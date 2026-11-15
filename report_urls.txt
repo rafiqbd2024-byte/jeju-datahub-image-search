@@ -1,0 +1,3 @@
+# (Optional) Direct PDF URLs of Jeju Data Hub periodic reports, one per line.
+# Format:  URL | title
+# If you downloaded the PDFs manually into data/reports/, leave this file as is.

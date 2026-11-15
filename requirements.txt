@@ -1,0 +1,9 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+sentence-transformers>=3.0
+streamlit==1.45.1
+numpy
+pillow
+pypdfium2
+requests
+qrcode[pil]
