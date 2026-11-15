@@ -96,17 +96,31 @@ def score_color(p: float) -> str:
     return "#16a34a" if p >= 70 else "#2563eb" if p >= 50 else "#f59e0b" if p >= 30 else "#9ca3af"
 
 
+def get_report_url(r) -> str:
+    if r.get("source"):
+        return r["source"]
+    m = re.match(r"^(\d+)_", r.get("report_id", ""))
+    if m:
+        return f"https://jejudatahub.net/report/serial/view/{m.group(1)}"
+    return "https://jejudatahub.net/report/serial/list"
+
+
 @st.dialog("이미지 상세 보기 (Detail view)", width="large")
 def show_image_modal(r):
     st.image(str(BASE_DIR / r["image"]), use_container_width=True)
-    st.markdown(f"**{r['title']}**  \n{r['report_title']} · p.{r['page']} / {r['n_pages']}")
+    source_url = get_report_url(r)
+    st.markdown(
+        f"**{r['title']}**  \n{r['report_title']} · p.{r['page']} / {r['n_pages']} · "
+        f"[🔗 제주데이터허브 원문 페이지]({source_url})"
+    )
     if "score" in r:
         st.markdown(f"**일치도 (Match): {r['score']*100:.1f}%** — {get_match_reason(r)}")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     c1.download_button("🖼️ 이미지 다운로드 (PNG)", read_bytes(r["image"]),
                        file_name=Path(r["image"]).name, mime="image/png", use_container_width=True)
     c2.download_button("📄 원본 리포트 (PDF)", read_bytes(r["pdf"]),
                        file_name=Path(r["pdf"]).name, mime="application/pdf", use_container_width=True)
+    c3.link_button("🌐 제주데이터허브 원문", source_url, use_container_width=True)
     with st.expander("페이지 텍스트 (Extracted text)"):
         st.write(r["text"][:1500])
 
@@ -137,12 +151,20 @@ def render_grid(results, n_cols=4, show_score=True):
 # --------------------------------------------------------------------------- #
 searcher = get_searcher()
 records = searcher.records
-reports = sorted({r["report_id"] for r in records})
+report_titles = {
+    r["report_id"]: r.get("report_title") or r["report_id"].replace("_", " ")
+    for r in records
+}
+reports = sorted(report_titles)
 
 with st.sidebar:
     st.header("⚙️ 검색 설정 (Settings)")
     top_k = st.slider("최대 결과 수 (Max results)", 8, 80, 40, step=4)
-    report_filter = st.multiselect("리포트 필터 (Filter by report)", reports)
+    report_filter = st.multiselect(
+        "리포트 필터 (Filter by report)",
+        reports,
+        format_func=lambda rid: report_titles.get(rid, rid),
+    )
     n_cols = st.select_slider("열 개수 (Columns)", options=[2, 3, 4, 5], value=4)
     st.divider()
     st.caption(f"📚 리포트 {len(reports)}개 · 🖼️ 이미지 {len(records)}개")

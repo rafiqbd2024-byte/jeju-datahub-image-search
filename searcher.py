@@ -96,6 +96,27 @@ def _load_synonyms():
 SYNONYMS = _load_synonyms()
 
 
+def _term_pattern(term: str) -> re.Pattern:
+    """Word-boundary-aware regex pattern for ASCII terms; literal match for Korean/CJK."""
+    escaped = re.escape(term)
+    if re.search(r"^[a-z0-9]", term, flags=re.I):
+        escaped = r"(?<![a-z0-9])" + escaped
+    if re.search(r"[a-z0-9]$", term, flags=re.I):
+        escaped = escaped + r"(?![a-z0-9])"
+    return re.compile(escaped, flags=re.I)
+
+
+def _key_matches_query(key: str, q: str, tokens: set) -> bool:
+    """Word-boundary-aware check for whether synonym dictionary key matches query."""
+    if key == q or key in tokens:
+        return True
+    if re.search(r"^[a-z0-9\s]+$", key, flags=re.I):
+        return bool(_term_pattern(key).search(q))
+    if len(key) < 2:
+        return False
+    return bool(re.search(rf"(?<![가-힣a-z0-9]){re.escape(key)}", q, flags=re.I))
+
+
 def expand_query_terms(query: str):
     """Return [(term, weight, kind)] - original tokens + KSIC synonym expansion."""
     q = query.strip().lower()
@@ -108,27 +129,48 @@ def expand_query_terms(query: str):
             terms.append((t, w, kind))
 
     add(q, 1.0, "query")
-    for tok in re.split(r"[\s,]+", q):
-        if len(tok) >= 2:
-            add(tok, 1.0, "query")
+    raw_tokens = [tok for tok in re.split(r"[\s,]+", q) if len(tok) >= 2]
+    for tok in raw_tokens:
+        add(tok, 1.0, "query")
+    token_set = set(raw_tokens)
     for key, syns in SYNONYMS.items():
-        if key in q:
+        if _key_matches_query(key, q, token_set):
             for s in syns:
                 add(s, 0.7, "synonym")
     return terms
 
 
+def _mask_matches(text: str, pattern: re.Pattern):
+    """Count non-overlapping matches of pattern in text and replace matched spans with null chars."""
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return 0, text
+    chars = list(text)
+    for m in matches:
+        for idx in range(m.start(), m.end()):
+            chars[idx] = "\x00"
+    return len(matches), "".join(chars)
+
+
 def compute_keyword_score(text: str, terms, title: str = ""):
     """Keyword score in [0, 1] (saturating) and list of matched (term, count, kind)."""
-    low, tlow = text.lower(), title.lower()
-    matched, raw = [], 0.0
-    for term, w, kind in terms:
-        c = low.count(term)
+    work_low, work_tlow = text.lower(), title.lower()
+    matched_by_idx, raw = {}, 0.0
+    # Match query terms before synonyms, and longer phrases before shorter substrings
+    ordered = sorted(
+        enumerate(terms),
+        key=lambda item: (0 if item[1][2] == "query" else 1, -len(item[1][0])),
+    )
+    for idx, (term, w, kind) in ordered:
+        pat = _term_pattern(term)
+        c, work_low = _mask_matches(work_low, pat)
         if c:
-            matched.append((term, c, kind))
+            matched_by_idx[idx] = (term, c, kind)
             raw += w * (0.5 + 0.1 * min(c, 5))
-            if term in tlow:
+            tc, work_tlow = _mask_matches(work_tlow, pat)
+            if tc:
                 raw += w * 0.8          # term appears in the chart title
+    matched = [matched_by_idx[i] for i in sorted(matched_by_idx)]
     score = 1.0 - float(np.exp(-raw / 1.5))
     return score, matched
 
@@ -160,11 +202,15 @@ class JejuMultimodalSearcher:
     def load_index(self):
         if not EMB_PATH.exists():
             return
-        data = np.load(EMB_PATH)
-        order = {rid: i for i, rid in enumerate(data["ids"].tolist())}
-        idx = [order[r["id"]] for r in self.records]
-        self.image_emb = data["image_emb"].astype(np.float32)[idx]
-        self.text_emb = data["text_emb"].astype(np.float32)[idx]
+        try:
+            data = np.load(EMB_PATH)
+            order = {rid: i for i, rid in enumerate(data["ids"].tolist())}
+            idx = [order[r["id"]] for r in self.records]
+            self.image_emb = data["image_emb"].astype(np.float32)[idx]
+            self.text_emb = data["text_emb"].astype(np.float32)[idx]
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] embeddings index mismatch or unreadable ({e}); falling back to keyword-only mode")
+            self.image_emb = self.text_emb = None
 
     @property
     def multimodal_ready(self):

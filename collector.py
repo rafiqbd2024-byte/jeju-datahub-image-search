@@ -27,6 +27,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (JejuDataHub-ImageSearch student project)"
 
 
 def _safe_name(name: str) -> str:
+    name = re.sub(r"\.pdf$", "", name.strip(), flags=re.I)
     name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip()
     return name[:120] or "report"
 
@@ -61,7 +62,8 @@ def fetch_from_jejudatahub_api(max_reports: int = 10):
         for info in file.get("fileInfos", []):
             if not info["fileName"].lower().endswith(".pdf"):
                 continue
-            target = REPORT_DIR / _safe_name(f"{item['id']}_{Path(info['fileName']).stem}.pdf")
+            stem = _safe_name(f"{item['id']}_{Path(info['fileName']).stem}")
+            target = REPORT_DIR / f"{stem}.pdf"
             meta[target.stem] = {"title": view["title"], "date": view.get("createAt", ""),
                                  "source": f"https://jejudatahub.net/report/serial/view/{item['id']}"}
             if target.exists():
@@ -81,17 +83,26 @@ def fetch_from_jejudatahub_api(max_reports: int = 10):
 def fetch_and_download_reports(max_reports: int = 10):
     """Download the latest periodic reports (API, or report_urls.txt) and register all PDFs."""
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    existing_meta = {}
+    if META_PATH.exists():
+        try:
+            for entry in json.loads(META_PATH.read_text(encoding="utf-8")):
+                if "report_id" in entry:
+                    existing_meta[entry["report_id"]] = entry
+        except Exception:  # noqa: BLE001
+            pass
+
     api_meta = {}
     try:
         api_meta = fetch_from_jejudatahub_api(max_reports)
     except Exception as e:  # noqa: BLE001
         print(f"[warn] Jeju Data Hub API not reachable ({e}); using report_urls.txt / local PDFs")
 
+    url_meta = {}
     for i, (url, title) in enumerate(_read_url_list()[:max_reports], start=1):
-        fname = _safe_name(title or Path(url.split("?")[0]).stem or f"report_{i}")
-        if not fname.lower().endswith(".pdf"):
-            fname += ".pdf"
-        target = REPORT_DIR / fname
+        stem = _safe_name(title or Path(url.split("?")[0]).stem or f"report_{i}")
+        target = REPORT_DIR / f"{stem}.pdf"
+        url_meta[target.stem] = {"title": title, "source": url}
         if target.exists():
             print(f"[skip] already downloaded: {target.name}")
             continue
@@ -117,16 +128,18 @@ def fetch_and_download_reports(max_reports: int = 10):
 
     meta = []
     for p in pdfs:
+        prev = existing_meta.get(p.stem, {})
         m = api_meta.get(p.stem, {})
+        u = url_meta.get(p.stem, {})
         meta.append(
             {
                 "report_id": p.stem,
-                "title": m.get("title", p.stem.replace("_", " ")),
-                "date": m.get("date", ""),
-                "source": m.get("source", ""),
+                "title": m.get("title") or u.get("title") or prev.get("title") or p.stem.replace("_", " "),
+                "date": m.get("date") or prev.get("date", ""),
+                "source": m.get("source") or prev.get("source") or u.get("source", ""),
                 "file": f"data/reports/{p.name}",  # relative path (cloud compatible)
                 "size_kb": p.stat().st_size // 1024,
-                "collected_at": datetime.now().strftime("%Y-%m-%d"),
+                "collected_at": m.get("collected_at") or prev.get("collected_at") or datetime.now().strftime("%Y-%m-%d"),
             }
         )
     META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
