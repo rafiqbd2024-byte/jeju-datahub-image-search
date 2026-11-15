@@ -15,7 +15,7 @@ from searcher import JejuMultimodalSearcher, load_text_model
 BASE_DIR = Path(__file__).resolve().parent
 
 # After deployment, put your public URL here (also used for the QR code).
-APP_URL = "https://jeju-datahub-image-search.streamlit.app"
+APP_URL = "https://jeju-data-image-search.streamlit.app"
 GITHUB_URL = "https://github.com/rafiqbd2024-byte/jeju-datahub-image-search"
 
 QUICK_KEYWORDS = ["렌터카", "외식", "카페", "숙박", "골프장", "면세점", "관광객", "연령별 소비", "rental car", "wind farm"]
