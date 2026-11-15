@@ -33,11 +33,15 @@ def _clean(text: str) -> str:
 
 
 def _guess_title(text: str, fallback: str) -> str:
-    """Pick the first meaningful line as the chart/page title."""
-    for line in text.splitlines():
-        line = line.strip()
-        if 4 <= len(line) <= 60 and not re.fullmatch(r"[\d\s.\-/%()]+", line):
+    """Chart title: prefer a bracketed heading like '[국내관광객] ...', else the longest Korean line."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for line in lines:
+        if re.match(r"^\[[^\]]+\]", line) and len(line) <= 80:
             return line
+    korean = [l for l in lines if re.search(r"[가-힣]", l) and 6 <= len(l) <= 80
+              and not re.fullmatch(r"[\d\s.,\-/%()]+", l)]
+    if korean:
+        return max(korean, key=len)
     return fallback
 
 

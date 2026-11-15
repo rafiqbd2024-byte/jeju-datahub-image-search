@@ -118,16 +118,19 @@ def expand_query_terms(query: str):
     return terms
 
 
-def compute_keyword_score(text: str, terms):
-    """Keyword score in [0, 1] and list of matched (term, count, kind)."""
-    low = text.lower()
-    matched, score = [], 0.0
+def compute_keyword_score(text: str, terms, title: str = ""):
+    """Keyword score in [0, 1] (saturating) and list of matched (term, count, kind)."""
+    low, tlow = text.lower(), title.lower()
+    matched, raw = [], 0.0
     for term, w, kind in terms:
         c = low.count(term)
         if c:
             matched.append((term, c, kind))
-            score += w * (1.0 + min(c, 5) * 0.1)
-    return min(score / 1.5, 1.0), matched
+            raw += w * (0.5 + 0.1 * min(c, 5))
+            if term in tlow:
+                raw += w * 0.8          # term appears in the chart title
+    score = 1.0 - float(np.exp(-raw / 1.5))
+    return score, matched
 
 
 def extract_snippet(text: str, terms, width: int = 70):
@@ -195,7 +198,7 @@ class JejuMultimodalSearcher:
         for i, r in enumerate(self.records):
             if report_filter and r["report_id"] not in report_filter:
                 continue
-            kw, matched = compute_keyword_score(r["text"], terms)
+            kw, matched = compute_keyword_score(r["text"], terms, r.get("title", ""))
             if self.multimodal_ready:
                 score = WEIGHTS["visual"] * vis[i] + WEIGHTS["semantic"] * sem[i] + WEIGHTS["keyword"] * kw
             else:
