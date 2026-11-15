@@ -1,0 +1,33 @@
+name: Build image search index
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["collector.py", "extractor.py", "searcher.py", "run_pipeline.py", "report_urls.txt", ".github/workflows/build-index.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install sentence-transformers pypdfium2 requests pillow numpy
+      - name: Run pipeline (collect -> extract -> embed)
+        run: python run_pipeline.py
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data
+          git commit -m "Build data index (reports, images, embeddings) [skip ci]" || echo "nothing to commit"
+          git push
